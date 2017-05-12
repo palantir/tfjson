@@ -1,0 +1,121 @@
+memo = "f30aaa96a2df1a4b87dbde2228e22622ad26ba0d2c1d1b0ba651bc641d542744"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/apparentlymart/go-cidr"
+  packages = ["cidr"]
+  revision = "7e4b007599d4e2076d9a81be723b3912852dda2c"
+
+[[projects]]
+  name = "github.com/aws/aws-sdk-go"
+  packages = ["aws","aws/awserr","aws/awsutil","aws/client","aws/client/metadata","aws/corehandlers","aws/credentials","aws/credentials/ec2rolecreds","aws/credentials/endpointcreds","aws/credentials/stscreds","aws/defaults","aws/ec2metadata","aws/endpoints","aws/request","aws/session","aws/signer/v4","private/protocol","private/protocol/query","private/protocol/query/queryutil","private/protocol/rest","private/protocol/restxml","private/protocol/xml/xmlutil","service/s3","service/sts"]
+  revision = "cea091b5b8fe6fcecf0eb6ec8f1a2570ff4ee6a7"
+  version = "v1.8.22"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/bgentry/go-netrc"
+  packages = ["netrc"]
+  revision = "9fd32a8b3d3d3f9d43c341bfe098430e07609480"
+
+[[projects]]
+  name = "github.com/go-ini/ini"
+  packages = ["."]
+  revision = "e7fea39b01aea8d5671f6858f0532f56e8bff3a5"
+  version = "v1.27.0"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/errwrap"
+  packages = ["."]
+  revision = "7554cd9344cec97297fa6649b055a8c98c2a1e55"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/go-getter"
+  packages = [".","helper/url"]
+  revision = "90b6568eac830f62a08e8f1f46375daa63e57015"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/go-multierror"
+  packages = ["."]
+  revision = "ed905158d87462226a13fe39ddf685ea65f1c11f"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/go-uuid"
+  packages = ["."]
+  revision = "64130c7a86d732268a38cb04cfbaf0cc987fda98"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/go-version"
+  packages = ["."]
+  revision = "03c5bf6be031b6dd45afec16b1cf94fc8938bc77"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/hcl"
+  packages = [".","hcl/ast","hcl/parser","hcl/scanner","hcl/strconv","hcl/token","json/parser","json/scanner","json/token"]
+  revision = "392dba7d905ed5d04a5794ba89f558b27e2ba1ca"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/hil"
+  packages = [".","ast","parser","scanner"]
+  revision = "fac2259da677551de1fb92b844c4d020a38d8468"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/terraform"
+  packages = ["config","config/module","dag","flatmap","helper/experiment","helper/hilmapstructure","helper/shadow","terraform"]
+  revision = "5367f2607e16cfeeff3d8ca1bf92b41cffd50772"
+
+[[projects]]
+  name = "github.com/jmespath/go-jmespath"
+  packages = ["."]
+  revision = "3433f3ea46d9f8019119e7dd41274e112a2359a9"
+  version = "0.2.2"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mitchellh/copystructure"
+  packages = ["."]
+  revision = "f81071c9d77b7931f78c90b416a074ecdc50e959"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mitchellh/go-homedir"
+  packages = ["."]
+  revision = "b8bc1bf767474819792c23f32d8286a45736f1c6"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mitchellh/go-testing-interface"
+  packages = ["."]
+  revision = "477c2d05a845d8b55912a5a7993b9b24abcc5ef8"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mitchellh/hashstructure"
+  packages = ["."]
+  revision = "9204ce590301a868e3e86938bc12eadd416b211e"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mitchellh/mapstructure"
+  packages = ["."]
+  revision = "cc8532a8e9a55ea36402aa21efdf403a60d34096"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mitchellh/reflectwalk"
+  packages = ["."]
+  revision = "8d802ff4ae93611b807597f639c19f76074df5c6"
+
+[[projects]]
+  name = "github.com/satori/go.uuid"
+  packages = ["."]
+  revision = "879c5887cd475cd7864858769793b2ceb0d44feb"
+  version = "v1.1.0"
