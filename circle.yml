@@ -1,0 +1,37 @@
+version: 2
+executorType: docker
+containerInfo:
+  - image: nmiyake/go:go-1.7.5-1.8.1-t35
+    cmd: ["/bin/bash"]
+stages:
+  build:
+    parallel: 2
+    workDir: /go/src/github.com/palantir/tfjson
+    environment:
+      - PROJECT: pkg
+      - GET_GO_VERSION: |
+            case $CIRCLE_NODE_INDEX in
+            0)
+                echo "1.8"
+                ;;
+            1)
+                echo "1.7"
+                ;;
+            *)
+                echo "Unexpected node $CIRCLE_NODE_INDEX"
+                ;;
+            esac
+    steps:
+      - type: checkout
+      - type: shell
+        name: "Set up /usr/local/go"
+        command: |
+          set -eu
+          rm /usr/local/go
+          ln -s "/usr/local/go-$(eval "$GET_GO_VERSION")" /usr/local/go
+      - type: shell
+        name: "Verify Go version"
+        command: go version
+      - type: shell
+        name: "Verify that package builds"
+        command: go build .
