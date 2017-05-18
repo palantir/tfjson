@@ -7,7 +7,7 @@ version of [Terraform PR #3170](https://github.com/hashicorp/terraform/pull/3170
 ## Installation
 
 ```
-$ go get github.com/palantir/tfjson
+$ go get github.com/philips/tfjson
 ```
 
 ## Usage
