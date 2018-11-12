@@ -77,6 +77,10 @@ $ tfjson terraform.tfplan
 }
 ```
 
+## Compatibility Notice
+
+This library is compatible up to Terraform v0.11.
+
 ## License
 
 This project is made available under the [MIT License](http://opensource.org/licenses/MIT).
