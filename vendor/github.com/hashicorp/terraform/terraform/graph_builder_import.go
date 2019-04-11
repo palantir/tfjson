@@ -2,6 +2,7 @@ package terraform
 
 import (
 	"github.com/hashicorp/terraform/config/module"
+	"github.com/hashicorp/terraform/dag"
 )
 
 // ImportGraphBuilder implements GraphBuilder and is responsible for building
@@ -23,6 +24,7 @@ func (b *ImportGraphBuilder) Build(path []string) (*Graph, error) {
 	return (&BasicGraphBuilder{
 		Steps:    b.Steps(),
 		Validate: true,
+		Name:     "ImportGraphBuilder",
 	}).Build(path)
 }
 
@@ -36,6 +38,13 @@ func (b *ImportGraphBuilder) Steps() []GraphTransformer {
 		mod = module.NewEmptyTree()
 	}
 
+	// Custom factory for creating providers.
+	concreteProvider := func(a *NodeAbstractProvider) dag.Vertex {
+		return &NodeApplyableProvider{
+			NodeAbstractProvider: a,
+		}
+	}
+
 	steps := []GraphTransformer{
 		// Create all our resources from the configuration and state
 		&ConfigTransformer{Module: mod},
@@ -43,17 +52,16 @@ func (b *ImportGraphBuilder) Steps() []GraphTransformer {
 		// Add the import steps
 		&ImportStateTransformer{Targets: b.ImportTargets},
 
-		// Provider-related transformations
-		&MissingProviderTransformer{Providers: b.Providers},
-		&ProviderTransformer{},
-		&DisableProviderTransformer{},
-		&PruneProviderTransformer{},
+		TransformProviders(b.Providers, concreteProvider, mod),
+
+		// This validates that the providers only depend on variables
+		&ImportProviderValidateTransformer{},
+
+		// Close opened plugin connections
+		&CloseProviderTransformer{},
 
 		// Single root
 		&RootTransformer{},
-
-		// Insert nodes to close opened plugin connections
-		&CloseProviderTransformer{},
 
 		// Optimize
 		&TransitiveReductionTransformer{},

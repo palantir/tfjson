@@ -1,6 +1,8 @@
 package terraform
 
-import "sync"
+import (
+	"sync"
+)
 
 // MockResourceProvider implements ResourceProvider but mocks out all the
 // calls for testing purposes.
@@ -12,6 +14,10 @@ type MockResourceProvider struct {
 
 	CloseCalled                    bool
 	CloseError                     error
+	GetSchemaCalled                bool
+	GetSchemaRequest               *ProviderSchemaRequest
+	GetSchemaReturn                *ProviderSchema
+	GetSchemaReturnError           error
 	InputCalled                    bool
 	InputInput                     UIInput
 	InputConfig                    *ResourceConfig
@@ -56,6 +62,9 @@ type MockResourceProvider struct {
 	ReadDataDiffFn                 func(*InstanceInfo, *ResourceConfig) (*InstanceDiff, error)
 	ReadDataDiffReturn             *InstanceDiff
 	ReadDataDiffReturnError        error
+	StopCalled                     bool
+	StopFn                         func() error
+	StopReturnError                error
 	DataSourcesCalled              bool
 	DataSourcesReturn              []DataSource
 	ValidateCalled                 bool
@@ -89,8 +98,19 @@ func (p *MockResourceProvider) Close() error {
 	return p.CloseError
 }
 
+func (p *MockResourceProvider) GetSchema(req *ProviderSchemaRequest) (*ProviderSchema, error) {
+	p.Lock()
+	defer p.Unlock()
+
+	p.GetSchemaCalled = true
+	p.GetSchemaRequest = req
+	return p.GetSchemaReturn, p.GetSchemaReturnError
+}
+
 func (p *MockResourceProvider) Input(
 	input UIInput, c *ResourceConfig) (*ResourceConfig, error) {
+	p.Lock()
+	defer p.Unlock()
 	p.InputCalled = true
 	p.InputInput = input
 	p.InputConfig = c
@@ -141,6 +161,18 @@ func (p *MockResourceProvider) Configure(c *ResourceConfig) error {
 	return p.ConfigureReturnError
 }
 
+func (p *MockResourceProvider) Stop() error {
+	p.Lock()
+	defer p.Unlock()
+
+	p.StopCalled = true
+	if p.StopFn != nil {
+		return p.StopFn()
+	}
+
+	return p.StopReturnError
+}
+
 func (p *MockResourceProvider) Apply(
 	info *InstanceInfo,
 	state *InstanceState,
@@ -157,7 +189,7 @@ func (p *MockResourceProvider) Apply(
 		return p.ApplyFn(info, state, diff)
 	}
 
-	return p.ApplyReturn, p.ApplyReturnError
+	return p.ApplyReturn.DeepCopy(), p.ApplyReturnError
 }
 
 func (p *MockResourceProvider) Diff(
@@ -171,11 +203,12 @@ func (p *MockResourceProvider) Diff(
 	p.DiffInfo = info
 	p.DiffState = state
 	p.DiffDesired = desired
+
 	if p.DiffFn != nil {
 		return p.DiffFn(info, state, desired)
 	}
 
-	return p.DiffReturn, p.DiffReturnError
+	return p.DiffReturn.DeepCopy(), p.DiffReturnError
 }
 
 func (p *MockResourceProvider) Refresh(
@@ -192,7 +225,7 @@ func (p *MockResourceProvider) Refresh(
 		return p.RefreshFn(info, s)
 	}
 
-	return p.RefreshReturn, p.RefreshReturnError
+	return p.RefreshReturn.DeepCopy(), p.RefreshReturnError
 }
 
 func (p *MockResourceProvider) Resources() []ResourceType {
@@ -214,7 +247,15 @@ func (p *MockResourceProvider) ImportState(info *InstanceInfo, id string) ([]*In
 		return p.ImportStateFn(info, id)
 	}
 
-	return p.ImportStateReturn, p.ImportStateReturnError
+	var result []*InstanceState
+	if p.ImportStateReturn != nil {
+		result = make([]*InstanceState, len(p.ImportStateReturn))
+		for i, v := range p.ImportStateReturn {
+			result[i] = v.DeepCopy()
+		}
+	}
+
+	return result, p.ImportStateReturnError
 }
 
 func (p *MockResourceProvider) ValidateDataSource(t string, c *ResourceConfig) ([]string, []error) {
@@ -245,7 +286,7 @@ func (p *MockResourceProvider) ReadDataDiff(
 		return p.ReadDataDiffFn(info, desired)
 	}
 
-	return p.ReadDataDiffReturn, p.ReadDataDiffReturnError
+	return p.ReadDataDiffReturn.DeepCopy(), p.ReadDataDiffReturnError
 }
 
 func (p *MockResourceProvider) ReadDataApply(
@@ -262,7 +303,7 @@ func (p *MockResourceProvider) ReadDataApply(
 		return p.ReadDataApplyFn(info, d)
 	}
 
-	return p.ReadDataApplyReturn, p.ReadDataApplyReturnError
+	return p.ReadDataApplyReturn.DeepCopy(), p.ReadDataApplyReturnError
 }
 
 func (p *MockResourceProvider) DataSources() []DataSource {

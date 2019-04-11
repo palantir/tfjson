@@ -50,6 +50,26 @@ func (c *Config) TestString() string {
 	return strings.TrimSpace(buf.String())
 }
 
+func terraformStr(t *Terraform) string {
+	result := ""
+
+	if b := t.Backend; b != nil {
+		result += fmt.Sprintf("backend (%s)\n", b.Type)
+
+		keys := make([]string, 0, len(b.RawConfig.Raw))
+		for k, _ := range b.RawConfig.Raw {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			result += fmt.Sprintf("  %s\n", k)
+		}
+	}
+
+	return strings.TrimSpace(result)
+}
+
 func modulesStr(ms []*Module) string {
 	result := ""
 	order := make([]int, 0, len(ms))
@@ -100,9 +120,56 @@ func outputsStr(os []*Output) string {
 
 		result += fmt.Sprintf("%s\n", n)
 
+		if len(o.DependsOn) > 0 {
+			result += fmt.Sprintf("  dependsOn\n")
+			for _, d := range o.DependsOn {
+				result += fmt.Sprintf("    %s\n", d)
+			}
+		}
+
 		if len(o.RawConfig.Variables) > 0 {
 			result += fmt.Sprintf("  vars\n")
 			for _, rawV := range o.RawConfig.Variables {
+				kind := "unknown"
+				str := rawV.FullKey()
+
+				switch rawV.(type) {
+				case *ResourceVariable:
+					kind = "resource"
+				case *UserVariable:
+					kind = "user"
+				}
+
+				result += fmt.Sprintf("    %s: %s\n", kind, str)
+			}
+		}
+
+		if o.Description != "" {
+			result += fmt.Sprintf("  description\n    %s\n", o.Description)
+		}
+	}
+
+	return strings.TrimSpace(result)
+}
+
+func localsStr(ls []*Local) string {
+	ns := make([]string, 0, len(ls))
+	m := make(map[string]*Local)
+	for _, l := range ls {
+		ns = append(ns, l.Name)
+		m[l.Name] = l
+	}
+	sort.Strings(ns)
+
+	result := ""
+	for _, n := range ns {
+		l := m[n]
+
+		result += fmt.Sprintf("%s\n", n)
+
+		if len(l.RawConfig.Variables) > 0 {
+			result += fmt.Sprintf("  vars\n")
+			for _, rawV := range l.RawConfig.Variables {
 				kind := "unknown"
 				str := rawV.FullKey()
 
@@ -207,7 +274,16 @@ func resourcesStr(rs []*Resource) string {
 		if len(r.Provisioners) > 0 {
 			result += fmt.Sprintf("  provisioners\n")
 			for _, p := range r.Provisioners {
-				result += fmt.Sprintf("    %s\n", p.Type)
+				when := ""
+				if p.When != ProvisionerWhenCreate {
+					when = fmt.Sprintf(" (%s)", p.When.String())
+				}
+
+				result += fmt.Sprintf("    %s%s\n", p.Type, when)
+
+				if p.OnFailure != ProvisionerOnFailureFail {
+					result += fmt.Sprintf("      on_failure = %s\n", p.OnFailure.String())
+				}
 
 				ks := make([]string, 0, len(p.RawConfig.Raw))
 				for k, _ := range p.RawConfig.Raw {

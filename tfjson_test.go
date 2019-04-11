@@ -46,12 +46,14 @@ module "inner" {
 
 const innerTF = `
 resource "aws_vpc" "inner" {
-  cidr_block = "10.0.0.0/8"
+  cidr_block = "10.0.0.0/28"
 }
 `
 
 const expected = `{
     "aws_vpc.main": {
+        "arn": "",
+        "assign_generated_ipv6_cidr_block": "false",
         "cidr_block": "10.0.0.0/16",
         "default_network_acl_id": "",
         "default_route_table_id": "",
@@ -60,16 +62,22 @@ const expected = `{
         "destroy_tainted": false,
         "dhcp_options_id": "",
         "enable_classiclink": "",
+        "enable_classiclink_dns_support": "",
         "enable_dns_hostnames": "",
-        "enable_dns_support": "",
+        "enable_dns_support": "true",
         "id": "",
-        "instance_tenancy": "",
-        "main_route_table_id": ""
+        "instance_tenancy": "default",
+        "ipv6_association_id": "",
+        "ipv6_cidr_block": "",
+        "main_route_table_id": "",
+        "owner_id": ""
     },
     "destroy": false,
     "inner": {
         "aws_vpc.inner": {
-            "cidr_block": "10.0.0.0/8",
+            "arn": "",
+            "assign_generated_ipv6_cidr_block": "false",
+            "cidr_block": "10.0.0.0/28",
             "default_network_acl_id": "",
             "default_route_table_id": "",
             "default_security_group_id": "",
@@ -77,18 +85,22 @@ const expected = `{
             "destroy_tainted": false,
             "dhcp_options_id": "",
             "enable_classiclink": "",
+            "enable_classiclink_dns_support": "",
             "enable_dns_hostnames": "",
-            "enable_dns_support": "",
+            "enable_dns_support": "true",
             "id": "",
-            "instance_tenancy": "",
-            "main_route_table_id": ""
+            "instance_tenancy": "default",
+            "ipv6_association_id": "",
+            "ipv6_cidr_block": "",
+            "main_route_table_id": "",
+            "owner_id": ""
         },
         "destroy": false
     }
 }`
 
 func Test(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
+	dir, err := ioutil.TempDir("./", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +121,8 @@ func Test(t *testing.T) {
 
 	planPath := filepath.Join(dir, "terraform.tfplan")
 	mustRun(t, "terraform", "get", dir)
-	mustRun(t, "terraform", "plan", "-out="+planPath, dir)
+	mustRun(t, "terraform", "init", "-backend=false", "-get=true", "-get-plugins=true", dir)
+	mustRun(t, "terraform", "plan", "-refresh=false", "-state=null", "-out="+planPath,  dir)
 
 	j, err := tfjson(planPath)
 	if err != nil {
