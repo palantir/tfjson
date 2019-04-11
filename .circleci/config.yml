@@ -14,7 +14,7 @@ jobs:
           command: go version; echo $PATH
       - run:
           name: "Run Go Tests"
-          command: go test
+          command: echo $PATH; go test
           environment:
             GO111MODULE: 'on'
             PATH: '\$PATH:\$GOPATH/bin'
