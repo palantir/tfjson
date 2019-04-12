@@ -14,7 +14,7 @@ jobs:
           command: go version
       - run:
           name: "Install terraform"
-          command: go install /go/src/github.com/hashicorp/terraform
+          command: go mod download; go install /go/src/github.com/hashicorp/terraform
       - run:
           name: "Run Go Tests"
           command: go test
