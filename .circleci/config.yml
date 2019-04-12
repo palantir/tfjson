@@ -13,8 +13,11 @@ jobs:
           name: "Verify Go version"
           command: go version
       - run:
+          name: "Get dependencies"
+          command: go get
+      - run:
           name: "Install terraform"
-          command: go get; go mod download -json; go install /go/pkg/mod/github.com/hashicorp/terraform@v0.11.13
+          command: go install /go/pkg/mod/github.com/hashicorp/terraform@v0.11.13
       - run:
           name: "Run Go Tests"
           command: go test
