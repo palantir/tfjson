@@ -122,7 +122,7 @@ func Test(t *testing.T) {
 	planPath := filepath.Join(dir, "terraform.tfplan")
 	mustRun(t, "terraform", "get", dir)
 	mustRun(t, "terraform", "init", "-backend=false", "-get=true", "-get-plugins=true", dir)
-	mustRun(t, "terraform", "plan", "-out="+planPath, "-refresh=false", dir)
+	mustRun(t, "terraform", "plan", "-refresh=false", "-state=null", "-out="+planPath,  dir)
 
 	j, err := tfjson(planPath)
 	if err != nil {
