@@ -11,13 +11,15 @@ jobs:
       - checkout
       - run:
           name: "Verify Go version"
-          command: go version; echo $PATH
+          command: go version
+      - run:
+          name: "Install terraform"
+          command: go install /go/src/github.com/hashicorp/terraform
       - run:
           name: "Run Go Tests"
-          command: echo $PATH; go test
+          command: go test
           environment:
             GO111MODULE: 'on'
-            PATH: "$PATH:$GOPATH/bin"
       - run:
           name: "Verify that package builds"
           command: go build .
