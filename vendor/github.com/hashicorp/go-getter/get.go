@@ -18,6 +18,8 @@ import (
 	"os/exec"
 	"regexp"
 	"syscall"
+
+	cleanhttp "github.com/hashicorp/go-cleanhttp"
 )
 
 // Getter defines the interface that schemes must implement to download
@@ -35,6 +37,10 @@ type Getter interface {
 	// reference a single file. If possible, the Getter should check if
 	// the remote end contains the same file and no-op this operation.
 	GetFile(string, *url.URL) error
+
+	// ClientMode returns the mode based on the given URL. This is used to
+	// allow clients to let the getters decide which mode to use.
+	ClientMode(*url.URL) (ClientMode, error)
 }
 
 // Getters is the mapping of scheme to the Getter implementation that will
@@ -45,8 +51,13 @@ var Getters map[string]Getter
 // syntax is schema::url, example: git::https://foo.com
 var forcedRegexp = regexp.MustCompile(`^([A-Za-z0-9]+)::(.+)$`)
 
+// httpClient is the default client to be used by HttpGetters.
+var httpClient = cleanhttp.DefaultClient()
+
 func init() {
-	httpGetter := &HttpGetter{Netrc: true}
+	httpGetter := &HttpGetter{
+		Netrc: true,
+	}
 
 	Getters = map[string]Getter{
 		"file":  new(FileGetter),

@@ -52,16 +52,6 @@ func (n *EvalApply) Eval(ctx EvalContext) (interface{}, error) {
 		*n.CreateNew = state.ID == "" && !diff.GetDestroy() || diff.RequiresNew()
 	}
 
-	{
-		// Call pre-apply hook
-		err := ctx.Hook(func(h Hook) (HookAction, error) {
-			return h.PreApply(n.Info, state, diff)
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	// With the completed diff, apply!
 	log.Printf("[DEBUG] apply: %s: executing Apply", n.Info.Id)
 	state, err := provider.Apply(n.Info, state, diff)
@@ -104,6 +94,37 @@ func (n *EvalApply) Eval(ctx EvalContext) (interface{}, error) {
 	return nil, nil
 }
 
+// EvalApplyPre is an EvalNode implementation that does the pre-Apply work
+type EvalApplyPre struct {
+	Info  *InstanceInfo
+	State **InstanceState
+	Diff  **InstanceDiff
+}
+
+// TODO: test
+func (n *EvalApplyPre) Eval(ctx EvalContext) (interface{}, error) {
+	state := *n.State
+	diff := *n.Diff
+
+	// If the state is nil, make it non-nil
+	if state == nil {
+		state = new(InstanceState)
+	}
+	state.init()
+
+	if resourceHasUserVisibleApply(n.Info) {
+		// Call post-apply hook
+		err := ctx.Hook(func(h Hook) (HookAction, error) {
+			return h.PreApply(n.Info, state, diff)
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, nil
+}
+
 // EvalApplyPost is an EvalNode implementation that does the post-Apply work
 type EvalApplyPost struct {
 	Info  *InstanceInfo
@@ -115,7 +136,7 @@ type EvalApplyPost struct {
 func (n *EvalApplyPost) Eval(ctx EvalContext) (interface{}, error) {
 	state := *n.State
 
-	{
+	if resourceHasUserVisibleApply(n.Info) {
 		// Call post-apply hook
 		err := ctx.Hook(func(h Hook) (HookAction, error) {
 			return h.PostApply(n.Info, state, *n.Error)
@@ -126,6 +147,22 @@ func (n *EvalApplyPost) Eval(ctx EvalContext) (interface{}, error) {
 	}
 
 	return nil, *n.Error
+}
+
+// resourceHasUserVisibleApply returns true if the given resource is one where
+// apply actions should be exposed to the user.
+//
+// Certain resources do apply actions only as an implementation detail, so
+// these should not be advertised to code outside of this package.
+func resourceHasUserVisibleApply(info *InstanceInfo) bool {
+	addr := info.ResourceAddress()
+
+	// Only managed resources have user-visible apply actions.
+	// In particular, this excludes data resources since we "apply" these
+	// only as an implementation detail of removing them from state when
+	// they are destroyed. (When reading, they don't get here at all because
+	// we present them as "Refresh" actions.)
+	return addr.Mode == config.ManagedResourceMode
 }
 
 // EvalApplyProvisioners is an EvalNode implementation that executes
@@ -140,25 +177,33 @@ type EvalApplyProvisioners struct {
 	InterpResource *Resource
 	CreateNew      *bool
 	Error          *error
+
+	// When is the type of provisioner to run at this point
+	When config.ProvisionerWhen
 }
 
 // TODO: test
 func (n *EvalApplyProvisioners) Eval(ctx EvalContext) (interface{}, error) {
 	state := *n.State
 
-	if !*n.CreateNew {
+	if n.CreateNew != nil && !*n.CreateNew {
 		// If we're not creating a new resource, then don't run provisioners
 		return nil, nil
 	}
 
-	if len(n.Resource.Provisioners) == 0 {
+	provs := n.filterProvisioners()
+	if len(provs) == 0 {
 		// We have no provisioners, so don't do anything
 		return nil, nil
 	}
 
+	// taint tells us whether to enable tainting.
+	taint := n.When == config.ProvisionerWhenCreate
+
 	if n.Error != nil && *n.Error != nil {
-		// We're already errored creating, so mark as tainted and continue
-		state.Tainted = true
+		if taint {
+			state.Tainted = true
+		}
 
 		// We're already tainted, so just return out
 		return nil, nil
@@ -176,16 +221,14 @@ func (n *EvalApplyProvisioners) Eval(ctx EvalContext) (interface{}, error) {
 
 	// If there are no errors, then we append it to our output error
 	// if we have one, otherwise we just output it.
-	err := n.apply(ctx)
+	err := n.apply(ctx, provs)
 	if err != nil {
-		// Provisioning failed, so mark the resource as tainted
-		state.Tainted = true
-
-		if n.Error != nil {
-			*n.Error = multierror.Append(*n.Error, err)
-		} else {
-			return nil, err
+		if taint {
+			state.Tainted = true
 		}
+
+		*n.Error = multierror.Append(*n.Error, err)
+		return nil, err
 	}
 
 	{
@@ -201,7 +244,29 @@ func (n *EvalApplyProvisioners) Eval(ctx EvalContext) (interface{}, error) {
 	return nil, nil
 }
 
-func (n *EvalApplyProvisioners) apply(ctx EvalContext) error {
+// filterProvisioners filters the provisioners on the resource to only
+// the provisioners specified by the "when" option.
+func (n *EvalApplyProvisioners) filterProvisioners() []*config.Provisioner {
+	// Fast path the zero case
+	if n.Resource == nil {
+		return nil
+	}
+
+	if len(n.Resource.Provisioners) == 0 {
+		return nil
+	}
+
+	result := make([]*config.Provisioner, 0, len(n.Resource.Provisioners))
+	for _, p := range n.Resource.Provisioners {
+		if p.When == n.When {
+			result = append(result, p)
+		}
+	}
+
+	return result
+}
+
+func (n *EvalApplyProvisioners) apply(ctx EvalContext, provs []*config.Provisioner) error {
 	state := *n.State
 
 	// Store the original connection info, restore later
@@ -210,18 +275,18 @@ func (n *EvalApplyProvisioners) apply(ctx EvalContext) error {
 		state.Ephemeral.ConnInfo = origConnInfo
 	}()
 
-	for _, prov := range n.Resource.Provisioners {
+	for _, prov := range provs {
 		// Get the provisioner
 		provisioner := ctx.Provisioner(prov.Type)
 
 		// Interpolate the provisioner config
-		provConfig, err := ctx.Interpolate(prov.RawConfig, n.InterpResource)
+		provConfig, err := ctx.Interpolate(prov.RawConfig.Copy(), n.InterpResource)
 		if err != nil {
 			return err
 		}
 
 		// Interpolate the conn info, since it may contain variables
-		connInfo, err := ctx.Interpolate(prov.ConnInfo, n.InterpResource)
+		connInfo, err := ctx.Interpolate(prov.ConnInfo.Copy(), n.InterpResource)
 		if err != nil {
 			return err
 		}
@@ -275,18 +340,30 @@ func (n *EvalApplyProvisioners) apply(ctx EvalContext) error {
 
 		// Invoke the Provisioner
 		output := CallbackUIOutput{OutputFn: outputFn}
-		if err := provisioner.Apply(&output, state, provConfig); err != nil {
-			return err
+		applyErr := provisioner.Apply(&output, state, provConfig)
+
+		// Call post hook
+		hookErr := ctx.Hook(func(h Hook) (HookAction, error) {
+			return h.PostProvision(n.Info, prov.Type, applyErr)
+		})
+
+		// Handle the error before we deal with the hook
+		if applyErr != nil {
+			// Determine failure behavior
+			switch prov.OnFailure {
+			case config.ProvisionerOnFailureContinue:
+				log.Printf(
+					"[INFO] apply: %s [%s]: error during provision, continue requested",
+					n.Info.Id, prov.Type)
+
+			case config.ProvisionerOnFailureFail:
+				return applyErr
+			}
 		}
 
-		{
-			// Call post hook
-			err := ctx.Hook(func(h Hook) (HookAction, error) {
-				return h.PostProvision(n.Info, prov.Type)
-			})
-			if err != nil {
-				return err
-			}
+		// Deal with the hook
+		if hookErr != nil {
+			return hookErr
 		}
 	}
 
