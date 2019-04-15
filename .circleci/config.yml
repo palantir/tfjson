@@ -10,10 +10,19 @@ jobs:
         description: |
           The executor used for this job.
         type: executor
+      usevendor:
+        description: |
+          Use the vendor directory for older versions of go
+        type: boolean
+        default: true
     executor: << parameters.executor >>
     steps:
       - go/setup:
           restore-mod-cache: false
+      - unless:
+          condition: << parameters.usevendor >>
+          steps:
+            - run: go get -v ./...
       - run: go version
       - run: go build .
 
@@ -27,14 +36,14 @@ workflows:
             name: go/golang
             owner-repo: palantir/tfjson
             version: 1.12.2
-            module: false
+            module: true
       - verify:
           name: verify-go-1.11
           executor:
             name: go/golang
             owner-repo: palantir/tfjson
             version: 1.11.8
-            module: false
+            module: true
       - verify:
           name: verify-go-1.10
           executor:
@@ -42,3 +51,4 @@ workflows:
             owner-repo: palantir/tfjson
             version: 1.10.8
             module: false
+          usevendor: true

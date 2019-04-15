@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform/config"
+	"github.com/hashicorp/terraform/version"
 )
 
 // EvalCompareDiff is an EvalNode implementation that compares two diffs
@@ -60,7 +61,7 @@ func (n *EvalCompareDiff) Eval(ctx EvalContext) (interface{}, error) {
 				"\n"+
 				"Also include as much context as you can about your config, state, "+
 				"and the steps you performed to trigger this error.\n",
-			n.Info.Id, Version, n.Info.Id, reason, one, two)
+			n.Info.Id, version.Version, n.Info.Id, reason, one, two)
 	}
 
 	return nil, nil
@@ -69,6 +70,7 @@ func (n *EvalCompareDiff) Eval(ctx EvalContext) (interface{}, error) {
 // EvalDiff is an EvalNode implementation that does a refresh for
 // a resource.
 type EvalDiff struct {
+	Name        string
 	Info        *InstanceInfo
 	Config      **ResourceConfig
 	Provider    *ResourceProvider
@@ -80,6 +82,12 @@ type EvalDiff struct {
 	// Resource is needed to fetch the ignore_changes list so we can
 	// filter user-requested ignored attributes from the diff.
 	Resource *config.Resource
+
+	// Stub is used to flag the generated InstanceDiff as a stub. This is used to
+	// ensure that the node exists to perform interpolations and generate
+	// computed paths off of, but not as an actual diff where resouces should be
+	// counted, and not as a diff that should be acted on.
+	Stub bool
 }
 
 // TODO: test
@@ -89,11 +97,13 @@ func (n *EvalDiff) Eval(ctx EvalContext) (interface{}, error) {
 	provider := *n.Provider
 
 	// Call pre-diff hook
-	err := ctx.Hook(func(h Hook) (HookAction, error) {
-		return h.PreDiff(n.Info, state)
-	})
-	if err != nil {
-		return nil, err
+	if !n.Stub {
+		err := ctx.Hook(func(h Hook) (HookAction, error) {
+			return h.PreDiff(n.Info, state)
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// The state for the diff must never be nil
@@ -110,6 +120,18 @@ func (n *EvalDiff) Eval(ctx EvalContext) (interface{}, error) {
 	}
 	if diff == nil {
 		diff = new(InstanceDiff)
+	}
+
+	// Set DestroyDeposed if we have deposed instances
+	_, err = readInstanceFromState(ctx, n.Name, nil, func(rs *ResourceState) (*InstanceState, error) {
+		if len(rs.Deposed) > 0 {
+			diff.DestroyDeposed = true
+		}
+
+		return nil, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// Preserve the DestroyTainted flag
@@ -139,20 +161,25 @@ func (n *EvalDiff) Eval(ctx EvalContext) (interface{}, error) {
 		})
 	}
 
+	// filter out ignored resources
 	if err := n.processIgnoreChanges(diff); err != nil {
 		return nil, err
 	}
 
 	// Call post-refresh hook
-	err = ctx.Hook(func(h Hook) (HookAction, error) {
-		return h.PostDiff(n.Info, diff)
-	})
-	if err != nil {
-		return nil, err
+	if !n.Stub {
+		err = ctx.Hook(func(h Hook) (HookAction, error) {
+			return h.PostDiff(n.Info, diff)
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Update our output
-	*n.OutputDiff = diff
+	// Update our output if we care
+	if n.OutputDiff != nil {
+		*n.OutputDiff = diff
+	}
 
 	// Update the state if we care
 	if n.OutputState != nil {
@@ -177,65 +204,84 @@ func (n *EvalDiff) processIgnoreChanges(diff *InstanceDiff) error {
 		return nil
 	}
 
-	changeType := diff.ChangeType()
-
 	// If we're just creating the resource, we shouldn't alter the
 	// Diff at all
-	if changeType == DiffCreate {
+	if diff.ChangeType() == DiffCreate {
 		return nil
 	}
 
+	// If the resource has been tainted then we don't process ignore changes
+	// since we MUST recreate the entire resource.
+	if diff.GetDestroyTainted() {
+		return nil
+	}
+
+	attrs := diff.CopyAttributes()
+
+	// get the complete set of keys we want to ignore
 	ignorableAttrKeys := make(map[string]bool)
 	for _, ignoredKey := range ignoreChanges {
-		for k := range diff.CopyAttributes() {
+		for k := range attrs {
 			if ignoredKey == "*" || strings.HasPrefix(k, ignoredKey) {
 				ignorableAttrKeys[k] = true
 			}
 		}
 	}
 
-	// If we are replacing the resource, then we expect there to be a bunch of
-	// extraneous attribute diffs we need to filter out for the other
-	// non-requires-new attributes going from "" -> "configval" or "" ->
-	// "<computed>". Filtering these out allows us to see if we might be able to
-	// skip this diff altogether.
-	if changeType == DiffDestroyCreate {
-		for k, v := range diff.CopyAttributes() {
+	// If the resource was being destroyed, check to see if we can ignore the
+	// reason for it being destroyed.
+	if diff.GetDestroy() {
+		for k, v := range attrs {
+			if k == "id" {
+				// id will always be changed if we intended to replace this instance
+				continue
+			}
 			if v.Empty() || v.NewComputed {
+				continue
+			}
+
+			// If any RequiresNew attribute isn't ignored, we need to keep the diff
+			// as-is to be able to replace the resource.
+			if v.RequiresNew && !ignorableAttrKeys[k] {
+				return nil
+			}
+		}
+
+		// Now that we know that we aren't replacing the instance, we can filter
+		// out all the empty and computed attributes. There may be a bunch of
+		// extraneous attribute diffs for the other non-requires-new attributes
+		// going from "" -> "configval" or "" -> "<computed>".
+		// We must make sure any flatmapped containers are filterred (or not) as a
+		// whole.
+		containers := groupContainers(diff)
+		keep := map[string]bool{}
+		for _, v := range containers {
+			if v.keepDiff(ignorableAttrKeys) {
+				// At least one key has changes, so list all the sibling keys
+				// to keep in the diff
+				for k := range v {
+					keep[k] = true
+					// this key may have been added by the user to ignore, but
+					// if it's a subkey in a container, we need to un-ignore it
+					// to keep the complete containter.
+					delete(ignorableAttrKeys, k)
+				}
+			}
+		}
+
+		for k, v := range attrs {
+			if (v.Empty() || v.NewComputed) && !keep[k] {
 				ignorableAttrKeys[k] = true
 			}
 		}
-
-		// Here we emulate the implementation of diff.RequiresNew() with one small
-		// tweak, we ignore the "id" attribute diff that gets added by EvalDiff,
-		// since that was added in reaction to RequiresNew being true.
-		requiresNewAfterIgnores := false
-		for k, v := range diff.CopyAttributes() {
-			if k == "id" {
-				continue
-			}
-			if _, ok := ignorableAttrKeys[k]; ok {
-				continue
-			}
-			if v.RequiresNew == true {
-				requiresNewAfterIgnores = true
-			}
-		}
-
-		// If we still require resource replacement after ignores, we
-		// can't touch the diff, as all of the attributes will be
-		// required to process the replacement.
-		if requiresNewAfterIgnores {
-			return nil
-		}
-
-		// Here we undo the two reactions to RequireNew in EvalDiff - the "id"
-		// attribute diff and the Destroy boolean field
-		log.Printf("[DEBUG] Removing 'id' diff and setting Destroy to false " +
-			"because after ignore_changes, this diff no longer requires replacement")
-		diff.DelAttribute("id")
-		diff.SetDestroy(false)
 	}
+
+	// Here we undo the two reactions to RequireNew in EvalDiff - the "id"
+	// attribute diff and the Destroy boolean field
+	log.Printf("[DEBUG] Removing 'id' diff and setting Destroy to false " +
+		"because after ignore_changes, this diff no longer requires replacement")
+	diff.DelAttribute("id")
+	diff.SetDestroy(false)
 
 	// If we didn't hit any of our early exit conditions, we can filter the diff.
 	for k := range ignorableAttrKeys {
@@ -245,6 +291,53 @@ func (n *EvalDiff) processIgnoreChanges(diff *InstanceDiff) error {
 	}
 
 	return nil
+}
+
+// a group of key-*ResourceAttrDiff pairs from the same flatmapped container
+type flatAttrDiff map[string]*ResourceAttrDiff
+
+// we need to keep all keys if any of them have a diff that's not ignored
+func (f flatAttrDiff) keepDiff(ignoreChanges map[string]bool) bool {
+	for k, v := range f {
+		ignore := false
+		for attr := range ignoreChanges {
+			if strings.HasPrefix(k, attr) {
+				ignore = true
+			}
+		}
+
+		if !v.Empty() && !v.NewComputed && !ignore {
+			return true
+		}
+	}
+	return false
+}
+
+// sets, lists and maps need to be compared for diff inclusion as a whole, so
+// group the flatmapped keys together for easier comparison.
+func groupContainers(d *InstanceDiff) map[string]flatAttrDiff {
+	isIndex := multiVal.MatchString
+	containers := map[string]flatAttrDiff{}
+	attrs := d.CopyAttributes()
+	// we need to loop once to find the index key
+	for k := range attrs {
+		if isIndex(k) {
+			// add the key, always including the final dot to fully qualify it
+			containers[k[:len(k)-1]] = flatAttrDiff{}
+		}
+	}
+
+	// loop again to find all the sub keys
+	for prefix, values := range containers {
+		for k, attrDiff := range attrs {
+			// we include the index value as well, since it could be part of the diff
+			if strings.HasPrefix(k, prefix) {
+				values[k] = attrDiff
+			}
+		}
+	}
+
+	return containers
 }
 
 // EvalDiffDestroy is an EvalNode implementation that returns a plain
